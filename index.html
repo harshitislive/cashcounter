@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cash Counter</title>
+<style>
+  :root { color-scheme: light; --ink:#172033; --muted:#667085; --line:#e5e7eb; --accent:#176b50; --bg:#f4f7f6; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Arial,Helvetica,sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:850px; margin:0 auto; padding:24px 16px 40px; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px; }
+  h1 { margin:0; font-size:clamp(26px,4vw,36px); letter-spacing:-.8px; }
+  .sub { margin:6px 0 0; color:var(--muted); font-size:14px; }
+  .badge { background:#e1f3eb; color:#176b50; border-radius:999px; padding:8px 12px; font-size:12px; font-weight:700; white-space:nowrap; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:18px; overflow:hidden; box-shadow:0 8px 24px #17203308; }
+  .summary { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
+  .metric { padding:18px; border-radius:16px; background:#fff; border:1px solid var(--line); }
+  .metric .label { color:var(--muted); font-size:13px; margin-bottom:8px; }
+  .metric .value { font-size:clamp(23px,4vw,32px); font-weight:800; letter-spacing:-.6px; overflow-wrap:anywhere; }
+  .table-head, .row { display:grid; grid-template-columns:1.1fr 1fr 1fr; align-items:center; gap:12px; padding:13px 18px; }
+  .table-head { background:#f9fafb; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+  .row { border-top:1px solid #eef0f2; }
+  .denom { font-size:17px; font-weight:800; }
+  .denom small { display:block; font-size:11px; color:var(--muted); font-weight:500; margin-top:3px; }
+  input[type=number] { width:100%; min-width:0; border:1px solid #d0d5dd; border-radius:10px; padding:11px 10px; font:inherit; font-size:16px; outline:none; }
+  input[type=number]:focus { border-color:var(--accent); box-shadow:0 0 0 3px #176b5018; }
+  .amount { text-align:right; font-weight:700; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+  .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+  button { border:0; border-radius:11px; padding:12px 16px; font:inherit; font-size:14px; font-weight:700; cursor:pointer; }
+  .primary { background:var(--accent); color:white; }
+  .secondary { background:white; color:var(--ink); border:1px solid var(--line); }
+  .danger { background:#fff1f0; color:#b42318; }
+  .note { color:var(--muted); font-size:12px; line-height:1.5; margin:16px 2px 0; }
+  .saved { color:var(--accent); font-size:12px; margin-left:auto; align-self:center; }
+  @media(max-width:520px) {
+    .wrap { padding:18px 10px 30px; }
+    .table-head,.row { padding:12px 10px; gap:8px; grid-template-columns:.85fr .9fr 1fr; }
+    .denom { font-size:15px; }
+    input[type=number] { padding:10px 7px; font-size:15px; }
+    .amount { font-size:14px; }
+    .badge { display:none; }
+  }
+  @media print {
+    body { background:white; }
+    .wrap { max-width:none; padding:0; }
+    .actions,.note,.badge { display:none !important; }
+    .card,.metric { box-shadow:none; }
+    input[type=number] { border:0; padding:0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Cash Counter</h1>
+      <p class="sub">Count notes, calculate totals, and keep your count saved in this browser.</p>
+    </div>
+    <span class="badge">AUTO-SAVING</span>
+  </header>
+
+  <section class="summary">
+    <div class="metric">
+      <div class="label">Total Cash</div>
+      <div class="value" id="grandTotal">₹0</div>
+    </div>
+    <div class="metric">
+      <div class="label">Total Notes</div>
+      <div class="value" id="noteTotal">0</div>
+    </div>
+  </section>
+
+  <section class="card" aria-label="Cash denominations">
+    <div class="table-head"><div>Denomination</div><div>Number of notes</div><div style="text-align:right">Amount</div></div>
+    <div id="rows"></div>
+  </section>
+
+  <div class="actions">
+    <button class="primary" id="printBtn">Print / Save PDF</button>
+    <button class="secondary" id="resetCounts">Reset counts</button>
+    <button class="danger" id="clearSaved">Clear all data</button>
+    <span class="saved" id="saveStatus" aria-live="polite">Saved in this browser</span>
+  </div>
+  <p class="note">Your counts are stored locally in this browser using localStorage. They are not uploaded to a server. Clearing browser site data or using a different browser/device may remove or not show this saved count.</p>
+</div>
+<script>
+(() => {
+  const denominations = [500, 200, 100, 50, 20, 10, 5, 2, 1];
+  const STORAGE_KEY = 'cash-counter-v1';
+  const rows = document.getElementById('rows');
+  const money = n => '₹' + Math.round(n).toLocaleString('en-IN');
+  let counts = {};
+
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    denominations.forEach(d => counts[d] = Number.isFinite(Number(stored[d])) && Number(stored[d]) >= 0 ? Math.floor(Number(stored[d])) : 0);
+  } catch (_) {
+    denominations.forEach(d => counts[d] = 0);
+  }
+
+  denominations.forEach(d => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <div class="denom">₹${d}<small>${d >= 10 ? 'Note' : 'Coin / note'}</small></div>
+      <div><input type="number" min="0" step="1" inputmode="numeric" aria-label="Number of ₹${d} notes or coins" id="count-${d}" value="${counts[d]}"></div>
+      <div class="amount" id="amount-${d}">₹0</div>`;
+    rows.appendChild(row);
+    row.querySelector('input').addEventListener('input', e => {
+      const value = Math.max(0, Math.floor(Number(e.target.value) || 0));
+      counts[d] = value;
+      if (e.target.value !== '' && Number(e.target.value) < 0) e.target.value = 0;
+      saveAndUpdate();
+    });
+  });
+
+  function saveAndUpdate() {
+    let total = 0, noteCount = 0;
+    denominations.forEach(d => {
+      const input = document.getElementById('count-' + d);
+      const count = Math.max(0, Math.floor(Number(input.value) || 0));
+      counts[d] = count;
+      const amount = d * count;
+      total += amount;
+      noteCount += count;
+      document.getElementById('amount-' + d).textContent = money(amount);
+    });
+    document.getElementById('grandTotal').textContent = money(total);
+    document.getElementById('noteTotal').textContent = noteCount.toLocaleString('en-IN');
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(counts));
+      document.getElementById('saveStatus').textContent = 'Saved in this browser';
+    } catch (_) {
+      document.getElementById('saveStatus').textContent = 'Could not save in browser';
+    }
+  }
+
+  document.getElementById('resetCounts').addEventListener('click', () => {
+    if (!confirm('Reset all note counts to zero?')) return;
+    denominations.forEach(d => document.getElementById('count-' + d).value = 0);
+    saveAndUpdate();
+  });
+
+  document.getElementById('clearSaved').addEventListener('click', () => {
+    if (!confirm('Clear all saved cash-count data from this browser?')) return;
+    localStorage.removeItem(STORAGE_KEY);
+    denominations.forEach(d => document.getElementById('count-' + d).value = 0);
+    saveAndUpdate();
+  });
+
+  document.getElementById('printBtn').addEventListener('click', () => window.print());
+  saveAndUpdate();
+})();
+</script>
+</body>
+</html>
